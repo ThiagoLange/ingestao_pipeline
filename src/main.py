@@ -10,7 +10,7 @@ from pathlib import Path
 import psycopg2
 
 DATA_DIR = Path("/data")
-BATCH_SIZE = 500_000
+BATCH_SIZE = 100_000
 ZIP_PATTERN = "Empresas*.zip"
 
 _PORTE = {"00":"NÃO INFORMADO","01":"MICRO EMPRESA","03":"EMPRESA DE PEQUENO PORTE","05":"DEMAIS"}
@@ -51,7 +51,7 @@ def create_table(conn, table_name):
                 capital_social DOUBLE PRECISION,
                 porte_codigo VARCHAR(2),
                 porte_descricao VARCHAR,
-                ente_federativo VARCHAR,
+                ente_federativo VARCHAR(2),
                 capital_social_faixa VARCHAR,
                 is_mei BOOLEAN,
                 natureza_juridica_grupo VARCHAR,
@@ -59,19 +59,6 @@ def create_table(conn, table_name):
                 data_processamento TIMESTAMP
             )
         """)
-        conn.commit()
-
-
-def flush(conn, table_bare, batch):
-    buf = io.StringIO("".join(batch))
-    with conn.cursor() as cur:
-        cur.copy_from(buf, table_bare, sep="\t", null="\\N", columns=(
-            "cnpj_basico", "razao_social", "natureza_juridica",
-            "qualificacao_responsavel", "capital_social", "porte_codigo",
-            "porte_descricao", "ente_federativo", "capital_social_faixa",
-            "is_mei", "natureza_juridica_grupo", "ente_federativo_presente",
-            "data_processamento",
-        ))
         conn.commit()
 
 
@@ -84,7 +71,7 @@ def process_zip(zip_path, conn, table_bare, now, t_start):
         with zf.open(csv_name, "r") as raw:
             text = io.TextIOWrapper(raw, encoding="iso-8859-1")
             reader = csv.reader(text, delimiter=";", quotechar='"')
-            batch = []
+            buf = io.StringIO()
             for row in reader:
                 if not row or len(row) < 7:
                     continue
@@ -124,24 +111,43 @@ def process_zip(zip_path, conn, table_bare, now, t_start):
                     ef_s = esc(ef) if ef else "\\N"
                     efp = "t" if ef else "f"
 
-                    line = (
+                    buf.write(
                         f"{esc(cnpj)}\t{esc(rs)}\t{esc(nj)}\t{esc(qr)}\t"
                         f"{cs_s}\t{esc(pc)}\t{esc(pd)}\t{ef_s}\t{esc(csf)}\t"
                         f"{imi}\t{esc(njg)}\t{efp}\t{now}\n"
                     )
-                    batch.append(line)
                     total += 1
                     if total % BATCH_SIZE == 0:
-                        flush(conn, table_bare, batch)
-                        batch = []
+                        buf.seek(0)
+                        with conn.cursor() as cur:
+                            cur.copy_from(buf, table_bare, sep="\t", null="\\N", columns=(
+                                "cnpj_basico", "razao_social", "natureza_juridica",
+                                "qualificacao_responsavel", "capital_social", "porte_codigo",
+                                "porte_descricao", "ente_federativo", "capital_social_faixa",
+                                "is_mei", "natureza_juridica_grupo", "ente_federativo_presente",
+                                "data_processamento",
+                            ))
+                        conn.commit()
+                        buf.close()
+                        buf = io.StringIO()
                         elapsed = time.time() - t_start
                         rate = total / elapsed if elapsed > 0 else 0
                         print(f"    {total:>10,} linhas | taxa: {rate:>8,.0f} linhas/s", end="\r")
                         sys.stdout.flush()
                 except Exception:
                     continue
-            if batch:
-                flush(conn, table_bare, batch)
+            if buf.tell() > 0:
+                buf.seek(0)
+                with conn.cursor() as cur:
+                    cur.copy_from(buf, table_bare, sep="\t", null="\\N", columns=(
+                        "cnpj_basico", "razao_social", "natureza_juridica",
+                        "qualificacao_responsavel", "capital_social", "porte_codigo",
+                        "porte_descricao", "ente_federativo", "capital_social_faixa",
+                        "is_mei", "natureza_juridica_grupo", "ente_federativo_presente",
+                        "data_processamento",
+                    ))
+                conn.commit()
+            buf.close()
     return total
 
 
@@ -154,7 +160,7 @@ def main():
     table_name = f"public.{pg_table}"
     table_bare = pg_table
 
-    print(f"=== Ingestão no Limite (Otimizado) ===")
+    print(f"=== Ingestão no Limite ===")
     print(f"Tabela       : {table_name}")
     print(f"Batch size   : {BATCH_SIZE:,} linhas")
     print()
