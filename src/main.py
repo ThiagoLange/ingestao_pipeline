@@ -51,7 +51,7 @@ def create_table(conn, table_name):
                 capital_social DOUBLE PRECISION,
                 porte_codigo VARCHAR(2),
                 porte_descricao VARCHAR,
-                ente_federativo VARCHAR(2),
+                ente_federativo VARCHAR,
                 capital_social_faixa VARCHAR,
                 is_mei BOOLEAN,
                 natureza_juridica_grupo VARCHAR,
