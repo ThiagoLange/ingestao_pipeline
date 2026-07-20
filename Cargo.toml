@@ -1,0 +1,20 @@
+[package]
+name = "ingestao_pipeline"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "ingestao_pipeline"
+path = "src/main.rs"
+
+[dependencies]
+zip = { version = "2", default-features = false, features = ["deflate"] }
+csv = "1"
+postgres = "0.19"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
