@@ -155,18 +155,31 @@ def load_into_postgres(conn, table_bare, csv_path):
 
 def dedup_cnpj_basico(conn, table_name):
     """cnpj_basico deve ser único (DQ-09). Duplicatas entre arquivos são raras (dado real:
-    1 em 68,6M) — em vez de gerar/manter índice (custa storage), faz uma única passada de
-    window function no Postgres (sort + partition, sem self-join) pra achar e remover as
-    repetidas. Roda no servidor Postgres, não conta na RAM do container do participante."""
+    1 em 68,6M) — então acha as chaves duplicadas primeiro (GROUP BY HAVING, hash agregado,
+    sem sort) e só paga o custo de um DELETE se realmente existir alguma. work_mem alto é
+    só de sessão (reseta ao fechar a conexão) e evita o hash agregado estourar pra disco —
+    sem isso, uma varredura de 68,6M chaves quase todas únicas cai num spill que custa
+    minutos. Roda no servidor Postgres, não conta na RAM do container do participante."""
     with conn.cursor() as cur:
-        cur.execute(f"""
-            DELETE FROM {table_name} t USING (
-                SELECT ctid, ROW_NUMBER() OVER (PARTITION BY cnpj_basico ORDER BY ctid) AS rn
-                FROM {table_name}
-            ) d
-            WHERE t.ctid = d.ctid AND d.rn > 1
-        """)
-        removed = cur.rowcount
+        cur.execute("SET work_mem = '4GB'")
+        cur.execute(f"SELECT cnpj_basico FROM {table_name} GROUP BY cnpj_basico HAVING count(*) > 1")
+        dup_keys = [row[0] for row in cur.fetchall()]
+        removed = 0
+        if dup_keys:
+            cur.execute(
+                f"""
+                DELETE FROM {table_name} t
+                WHERE t.cnpj_basico = ANY(%s)
+                AND t.ctid NOT IN (
+                    SELECT min(ctid) FROM {table_name}
+                    WHERE cnpj_basico = ANY(%s)
+                    GROUP BY cnpj_basico
+                )
+                """,
+                (dup_keys, dup_keys),
+            )
+            removed = cur.rowcount
+        cur.execute("RESET work_mem")
     conn.commit()
     return removed
 
