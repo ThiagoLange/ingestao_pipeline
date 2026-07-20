@@ -202,10 +202,18 @@ def main():
         total_linhas += n
         print(f"    -> {n:>10,} linhas em {elapsed_zip:.1f}s")
 
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {table_name} t1 USING {table_name} t2 WHERE t1.cnpj_basico = t2.cnpj_basico AND t1.ctid > t2.ctid")
+        dup = cur.rowcount
+        conn.commit()
+
     conn.close()
 
     elapsed = time.time() - t0
     print()
+    if dup:
+        total_linhas -= dup
+        print(f"Duplicatas removidas: {dup}")
     print(f"=== Finalizado ===")
     print(f"Total de linhas : {total_linhas:,}")
     print(f"Tempo total     : {elapsed:.1f}s")
