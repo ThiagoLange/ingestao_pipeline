@@ -405,17 +405,6 @@ fn main() {
         writer.finish().expect("falha ao finalizar COPY");
     }
 
-    // VACUUM nao pode rodar dentro de bloco de transacao — mesmo implicito, que e' o que
-    // batch_execute cria ao mandar 2+ statements numa unica mensagem simple-query.
-    client
-        .batch_execute(&format!(
-            "ALTER TABLE {table_name} SET (autovacuum_enabled = true);"
-        ))
-        .expect("falha ao reativar autovacuum");
-    client
-        .batch_execute(&format!("VACUUM (ANALYZE) {table_name};"))
-        .expect("falha ao rodar VACUUM ANALYZE");
-
     let elapsed = t0.elapsed().as_secs_f64();
     println!();
     if total_dup > 0 {
